@@ -93,7 +93,7 @@ GitHub CD (OIDC) ----------------------------> AWS EKS
 | Least privilege bonus | no SA token, restricted pod capabilities, GitHub OIDC, namespace-scoped EKS access |
 | No hardcoded cloud secrets | GitHub OIDC for AWS; Docker Hub token stored as GitHub secret |
 
-## Quick local application test
+## Quick local application test on Windows
 
 ### Windows PowerShell
 
