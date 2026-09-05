@@ -1,0 +1,99 @@
+name: CD - Deploy to EKS
+
+on:
+  workflow_run:
+    workflows: ["CI - Test, Scan and Publish"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy, e.g. sha-0123456789ab"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-2
+  EKS_CLUSTER_NAME: auspost-devops-demo
+  NAMESPACE: auspost-demo
+  DEPLOYMENT: auspost-devops-demo
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout deployed revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve image tag
+        id: image
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            TAG="sha-${SHA::12}"
+          fi
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/auspost-devops-demo:$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Render and apply desired state
+        id: rollout
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.image.outputs.image }}"
+
+          # Kustomize produces the environment-specific manifests. Replace only
+          # the known placeholder image before sending the rendered YAML to the API.
+          kubectl kustomize k8s/overlays/aws \
+            | sed "s#yourdockerhubuser/auspost-devops-demo:latest#$IMAGE#g" \
+            | kubectl apply -f -
+
+          if ! kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" --timeout=180s; then
+            echo "Rollout failed; rolling back."
+            kubectl -n "$NAMESPACE" rollout undo deployment/"$DEPLOYMENT"
+            kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" --timeout=180s
+            exit 1
+          fi
+
+      - name: Validate in-cluster health and deployed version
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl -n "$NAMESPACE" run healthcheck-${GITHUB_RUN_ID} \
+            --image=curlimages/curl:8.15.0 \
+            --restart=Never \
+            --rm -i \
+            --command -- sh -c \
+            "curl --fail --silent --retry 12 --retry-delay 5 http://auspost-devops-demo/healthz | tee /tmp/response && grep -q '\"version\":\"${{ steps.image.outputs.tag }}\"' /tmp/response"
+
+      - name: Show rollout history
+        if: always()
+        run: kubectl -n "$NAMESPACE" rollout history deployment/"$DEPLOYMENT"

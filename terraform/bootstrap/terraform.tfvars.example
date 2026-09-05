@@ -1,0 +1,4 @@
+aws_region        = "ap-southeast-2"
+project_name      = "auspost-devops-demo"
+github_repository = "YOUR_GITHUB_USER_OR_ORG/YOUR_REPOSITORY"
+state_bucket_name = "YOUR-GLOBALLY-UNIQUE-AUSPOST-TERRAFORM-STATE-BUCKET"

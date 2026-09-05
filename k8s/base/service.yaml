@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: auspost-devops-demo
+  namespace: auspost-demo
+spec:
+  selector:
+    app.kubernetes.io/name: auspost-devops-demo
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP

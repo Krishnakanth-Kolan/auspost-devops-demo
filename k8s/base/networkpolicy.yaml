@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auspost-devops-demo
+  namespace: auspost-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: auspost-devops-demo
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Public traffic is allowed only to the application port; all other
+    # inbound pod ports remain denied by this policy.
+    - ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # The demo application has no outbound dependency except DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
